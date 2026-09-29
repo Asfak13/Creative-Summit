@@ -134,7 +134,10 @@ const SUPABASE_URL = "https://bogplnipzgoiunlheneo.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvZ3BsbmlwemdvaXVubGhlbmVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MDg4NjYsImV4cCI6MjEwNjA4NDg2Nn0.G0r1itQA038ZidJY1NHiIszXAnw3-nH70gheqgSW-64";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const CV_BUCKET = "cvs";
-const SESSION_KEY = "salt_admin_session";      // sessionStorage: cleared when the tab closes
+/* Real Supabase Auth session (supabase-js persists this itself, in
+   localStorage under its own key) — not a hand-rolled flag. RLS on
+   submissions/cvs now requires this session; the anon key alone can no
+   longer read or change anything beyond inserting new applications. */
 
 const $ = (s, r=document) => r.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -163,7 +166,10 @@ function toast(msg){ const el = document.createElement("div"); el.className = "t
 /* =========================================================
    LOGIN
    ========================================================= */
-function isLoggedIn(){ return sessionStorage.getItem(SESSION_KEY) === "1"; }
+async function getSession(){
+  const { data } = await sb.auth.getSession();
+  return data.session || null;
+}
 
 function renderLogin(err){
   syncEl.textContent = "Signed out";
@@ -184,22 +190,26 @@ function renderLogin(err){
     const email = $("#lEmail").value.trim();
     const password = $("#lPass").value;
     try {
-      const { data, error } = await sb.rpc("admin_login", { p_email: email, p_password: password });
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      if (data === true) {
-        sessionStorage.setItem(SESSION_KEY, "1");
+      if (data.session) {
         renderDashboard();
       } else {
         renderLogin("Incorrect email or password.");
       }
     } catch (err) {
-      renderLogin("Couldn't reach the server. Check your connection and try again.");
+      // Supabase Auth returns a real error for bad credentials (not just a
+      // network failure), so surface that distinction to the person signing in.
+      const msg = err && /invalid login credentials/i.test(err.message || "")
+        ? "Incorrect email or password."
+        : "Couldn't reach the server. Check your connection and try again.";
+      renderLogin(msg);
       console.warn(err);
     }
   };
 }
 
-function logout(){ sessionStorage.removeItem(SESSION_KEY); if (unsub) { clearInterval(unsub); unsub = null; } renderLogin(); }
+async function logout(){ await sb.auth.signOut(); if (unsub) { clearInterval(unsub); unsub = null; } renderLogin(); }
 
 /* =========================================================
    DASHBOARD
@@ -461,7 +471,7 @@ async function exportCvsZip(){
 /* =========================================================
    BOOT
    ========================================================= */
-if (isLoggedIn()) renderDashboard(); else renderLogin();
+getSession().then(session => { if (session) renderDashboard(); else renderLogin(); });
 })();
 </script>
 </body>
