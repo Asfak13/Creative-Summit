@@ -72,7 +72,10 @@ button{cursor:pointer}
 .rec-h{padding-inline:max(16px,3vw);padding-block:14px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;border-bottom:1px solid var(--line)}
 .rec-h h2{font-family:var(--display);font-weight:900;text-transform:uppercase;font-size:30px;line-height:1;margin:0}
 .stats{display:flex;flex-wrap:wrap;gap:10px}
-.stat{border:1px solid var(--line);border-radius:14px;padding:10px 16px;min-width:120px}
+.stat{border:1px solid var(--line);border-radius:14px;padding:10px 16px;min-width:120px;background:transparent;text-align:start;color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
+.stat:hover{border-color:var(--paper)}
+.stat.on{background:var(--paper);color:var(--ground);border-color:var(--paper)}
+.stat.on span{color:inherit;opacity:.8}
 .stat b{display:block;font-family:var(--display);font-size:32px;line-height:1;font-variant-numeric:tabular-nums}
 .stat span{font-size:13px;color:var(--muted)}
 .tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -214,7 +217,7 @@ async function logout(){ await sb.auth.signOut(); if (unsub) { clearInterval(uns
 /* =========================================================
    DASHBOARD
    ========================================================= */
-let rows = [], q = "", roleFilter = "", statusFilter = "", dateFrom = "", dateTo = "", unsub = null;
+let rows = [], todayOnly = false, q = "", roleFilter = "", statusFilter = "", dateFrom = "", dateTo = "", unsub = null;
 
 async function renderDashboard(){
   syncEl.textContent = "Loading…";
@@ -262,7 +265,7 @@ async function renderDashboard(){
   $("#zipBtn").onclick = exportCvsZip;
   $("#search").oninput = e => { q = e.target.value; drawRows(); };
   $("#roleFilter").onchange = e => { roleFilter = e.target.value; drawRows(); };
-  $("#statusFilter").onchange = e => { statusFilter = e.target.value; drawRows(); };
+  $("#statusFilter").onchange = e => { statusFilter = e.target.value; todayOnly = false; drawStats(); drawRows(); };
   $("#dateFrom").onchange = e => { dateFrom = e.target.value; drawRows(); drawStats(); };
   $("#dateTo").onchange = e => { dateTo = e.target.value; drawRows(); drawStats(); };
   $("#clearDates").onclick = () => { dateFrom = ""; dateTo = ""; $("#dateFrom").value = ""; $("#dateTo").value = ""; drawRows(); drawStats(); };
@@ -314,6 +317,7 @@ function filtered(){
   return rows.filter(r =>
     (!roleFilter || r.role === roleFilter) &&
     (!statusFilter || r.status === statusFilter) &&
+    (!todayOnly || new Date(r.created_at).toDateString() === new Date().toDateString()) &&
     inDateRange(r) &&
     (!query || [r.name, r.email, r.phone, r.order_code].some(v => String(v||"").toLowerCase().includes(query)))
   );
@@ -322,11 +326,20 @@ function filtered(){
 function drawStats(){
   const inRange = rows.filter(inDateRange);
   const today = new Date().toDateString();
+  const card = (key, label, n, on) => `<button type="button" class="stat ${on?"on":""}" data-card="${key}" aria-pressed="${on}"><b>${n}</b><span>${label}</span></button>`;
+  const todayN = inRange.filter(r => new Date(r.created_at).toDateString() === today).length;
   $("#stats").innerHTML =
-    `<div class="stat"><b>${inRange.length}</b><span>Total</span></div>` +
-    `<div class="stat"><b>${inRange.filter(r => new Date(r.created_at).toDateString() === today).length}</b><span>Today</span></div>` +
-    `<div class="stat"><b>${inRange.filter(r => r.status === "new").length}</b><span>New</span></div>` +
-    `<div class="stat"><b>${inRange.filter(r => r.status === "shortlisted").length}</b><span>Shortlisted</span></div>`;
+    card("total", "Total", inRange.length, !todayOnly && !statusFilter) +
+    card("today", "Today", todayN, todayOnly) +
+    card("new", "New", inRange.filter(r => r.status === "new").length, !todayOnly && statusFilter === "new") +
+    card("shortlisted", "Shortlisted", inRange.filter(r => r.status === "shortlisted").length, !todayOnly && statusFilter === "shortlisted");
+  $("#stats").querySelectorAll("[data-card]").forEach(c => c.onclick = () => {
+    const k = c.dataset.card;
+    todayOnly = k === "today" && !todayOnly;
+    statusFilter = (k === "new" || k === "shortlisted") && statusFilter !== k ? k : "";
+    $("#statusFilter").value = statusFilter;
+    drawStats(); drawRows();
+  });
 }
 
 function cvCellHtml(r){
